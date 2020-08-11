@@ -1,0 +1,26 @@
+{
+  "name": "wfc-xp",
+  "version": "1.0.0",
+  "description": "Experiments with Wave Function Collapse in JavaScript",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "webpack": "webpack -w"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/emnh/wfc-xp.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/emnh/wfc-xp/issues"
+  },
+  "homepage": "https://github.com/emnh/wfc-xp#readme",
+  "dependencies": {
+    "gpu.js": "^2.9.5",
+    "image-pixels": "^2.2.2",
+    "webpack": "^4.44.1",
+    "webpack-cli": "^3.3.12"
+  }
+}
