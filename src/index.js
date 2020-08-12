@@ -6,13 +6,14 @@ const pixels = require('image-pixels');
 const $ = require('jquery');
 
 async function main() {
-    const pixelData = await pixels('flowers.png');
+    // const pixelData = await pixels('flowers.png');
     //const pixelData = await pixels('writing64.png');
+    const pixelData = await pixels('Skyline.png');
 
     const width = pixelData.width;
     const height = pixelData.height;
-    const outWidth = 40;
-    const outHeight = 40;
+    const outWidth = 100;
+    const outHeight = 100;
 
     const nbWidth = 4 * width;
     const size = width * height;
@@ -52,7 +53,9 @@ async function main() {
         // let nb2g = source[(x + y * this.constants.width) * 4 + 1] / 255.0;
         // let nb2b = source[(x + y * this.constants.width) * 4 + 2] / 255.0;
         // let nb2a = source[(x + y * this.constants.width) * 4 + 3] / 255.0;
-        let before = [current[flip(ty)][tx][0], current[flip(ty)][tx][1], current[flip(ty)][tx][2], current[flip(ty)][tx][3]];
+        //let before = [current[flip(ty)][tx][0], current[flip(ty)][tx][1], current[flip(ty)][tx][2], current[flip(ty)][tx][3]];
+        let cc2 = current[flip(ty)][tx];
+        let before = [cc2[0], cc2[1], cc2[2], cc2[3]];
 
         let k = 1;
         {
@@ -94,7 +97,9 @@ async function main() {
 
                                 let a = [nb1r, nb1g, nb1b, nb1a];
                                 let c = [nb2r, nb2g, nb2b, nb2a];
-                                let b = [current[flip(y3)][x3][0], current[flip(y3)][x3][1], current[flip(y3)][x3][2], current[flip(y3)][x3][3]];
+                                //let b = [current[flip(y3)][x3][0], current[flip(y3)][x3][1], current[flip(y3)][x3][2], current[flip(y3)][x3][3]];
+                                let cc = current[flip(y3)][x3];
+                                let b = [cc[0], cc[1], cc[2], cc[3]];
 
                                 //let d = Math.abs(distance(a, b));//Math.sqrt(length(a) * length(b));
                                 let d = euclidRGB(a, b);
@@ -212,18 +217,28 @@ async function main() {
         //let ttx = this.constants.width2 - this.thread.x - 1;
         let ttx = this.thread.x;
         let tty = this.thread.y; //this.constants.height2 - this.thread.y - 1;
+        let ttz = this.thread.z;
 
         let x = Math.floor(ttx % this.constants.width);
         let y = Math.floor(tty % this.constants.height); //this.constants.height - Math.floor(tty % this.constants.height) - 1;
-        //let tx = mx;
-        //let ty = my;
+        // let x = ttx;
+        // let y = tty;
+        // let tx = mx;
+        // let ty = my;
         let tx = mx > -0.5 ? mx : Math.floor(ttx / this.constants.width);
+        //let tx = mx > -0.5 ? mx : ttz;
         let ty = my > -0.5 ? my : Math.floor(tty / this.constants.height);
 
         //let ty = this.constants.height2 - Math.floor(tty / this.constants.height) - 1;
         //let ty = tty - y; //Math.floor(tty / this.constants.height);
 
-        let cur = [current[flip(ty)][tx][0], current[flip(ty)][tx][1], current[flip(ty)][tx][2], current[flip(ty)][tx][3]];
+        let c = current[flip(ty)][tx];
+        let cur = [c[0], c[1], c[2], c[3]];
+        // let cg = current[flip(ty)][tx][1];
+        // let cb = current[flip(ty)][tx][2];
+        // let ca = current[flip(ty)][tx][3];
+
+        //let cur = [0, 0, 0, 0];
 
         //this.color(Math.random(), Math.random(), Math.random(), 1.0);
         let ret = [0.0, 0.0, 0.0, 0.0];
@@ -233,6 +248,7 @@ async function main() {
         if (
             //Math.abs((tx + ty) % 4 - evenodd) <= 0.1 &&
             //tx == mx && ty == my &&
+            //ty == my &&
             (filled || euclid(cur, [0, 0, 0, 0]) < 0.001) &&
             cp > 0.5 + level) {
             // let nb1r = source[(x + y * this.constants.width) * 4 + 0] / 255.0;
@@ -243,6 +259,8 @@ async function main() {
             ret = [x + y * this.constants.width + 1, cp, ai, Math.random()];
             //ret = [nb1r, nb1g, nb1b, nb1a];
         }
+        // let ai = Math.floor(Math.random() * (this.constants.width * this.constants.height));
+        // ret = [x + y * this.constants.width + 1, cp, ai, Math.random()];
 
         return ret;
     },{
@@ -254,15 +272,46 @@ async function main() {
         }
     })
         .setFunctions([checkPixel, flip, euclid, euclidRGB])
-        //.setOutput([width, height]);
-        .setOutput([outWidth * width, outHeight * height]);
+        //.setPipeline(true)
+        .setOutput([width, height])
+        .setImmutable(true);
+        //.setOutput([outWidth * width, outHeight * height]);
+        //.setOutput([outWidth * width, height]);
 
+
+    const pastePixel = gpu.createKernel(function(current, toPaste, source, bigMap, mx, my, frame) {
+        let ttx = this.thread.x;
+        let tty = this.thread.y;
+        //let tty = this.constants.height2 - this.thread.y - 1;
+
+        //let ox = this.constants.width - this.thread.x - 1;
+        let ox = ttx;
+        let oy = tty;
+
+        let ret = current[oy][ox];
+        if (ox == mx && oy == my) {
+            ret = toPaste[0][0];
+        }
+
+        return ret;
+    },{
+        constants: {
+            width: width,
+            height: height,
+            width2: outWidth,
+            height2: outHeight
+        }
+    })
+        .setOutput([outWidth, outHeight])
+        .setImmutable(true);
 
     const remapCurrent = gpu.createKernel(function(current, source, bigMap, mx, my, frame) {
 
         //let ttx = this.constants.width2 - this.thread.x - 1;
-        let ttx = this.thread.x;
-        let tty = this.thread.y;
+        //let ttx = this.thread.x;
+        //let tty = this.thread.y;
+        let ttx = mx;
+        let tty = my;
         //let tty = this.constants.height2 - this.thread.y - 1;
 
         //let ox = this.constants.width - this.thread.x - 1;
@@ -272,11 +321,15 @@ async function main() {
         // let tx = mx > -0.5 ? ttx : ttx * this.constants.width;
         // let ty = my > -0.5 ? tty : tty * this.constants.height;
 
-        let ret = [current[flip(oy)][ox][0], current[flip(oy)][ox][1], current[flip(oy)][ox][2], current[flip(oy)][ox][3]];
+        //let ret = [current[flip(oy)][ox][0], current[flip(oy)][ox][1], current[flip(oy)][ox][2], current[flip(oy)][ox][3]];
+        let cc = current[flip(oy)][ox];
+        let ret = cc;
         //if (length(ret) <= 0.001) {
 
-        let sx = mx > -1 ? mx : 0;
-        let sy = my > -1 ? my : 0;
+        // let sx = mx > -0.5 ? mx : 0;
+        // let sy = my > -0.5 ? my : 0;
+        let sx = 0;
+        let sy = 0;
 
         let n = 0;
         let nn = 2 * n + 1;
@@ -296,8 +349,12 @@ async function main() {
         // }
         let tx = (ttx - (ttx % nn) + ftx) * this.constants.width;
         let ty = (tty - (tty % nn) + fty) * this.constants.height;
+        if (mx > -0.5 || my > -0.5) {
+            tx = 0;
+            ty = 0;
+        }
 
-        if ((mx < 0 || my < 0) || (ox == mx && oy == my))
+        if ((mx < 0 || my < 0) || (Math.abs(ox - mx) < 0.1 && Math.abs(oy - my) < 0.1))
         {
             let validCount = 0;
             let good = true;
@@ -360,7 +417,7 @@ async function main() {
             // let cty = ty + fty;
             //let aiv = bigMap[ty + (tty - tty % n) - sy][tx + (ttx - ttx % n) - sx];
             //let aiv = bigMap[tty + fty - sy][ttx + ftx - sx];
-            let aiv = bigMap[ty / this.constants.height - sy][tx / this.constants.width - sx];
+            //let aiv = bigMap[ty / this.constants.height - sy][tx / this.constants.width - sx];
             //let rndCandidate = aiv[3] * validCount;
             let validCount2 = 0;
             //let ret = [0, 0, 0, 0];
@@ -389,9 +446,9 @@ async function main() {
                                     let b = source[ai * 4 + 1] / 255;
                                     let c = source[ai * 4 + 2] / 255;
                                     let d = source[ai * 4 + 3] / 255;
-                                    //if (euclid(ret, [0, 0, 0, 0]) <= 0.0) {
+                                    if (euclidRGB(ret, [0, 0, 0, 0]) <= 0.0) {
                                         ret = [a, b, c, d];
-                                    //}
+                                    }
                                     return ret;
                                 } else {
                                     return ret;
@@ -411,17 +468,71 @@ async function main() {
             height2: outHeight
         }
     })
-        .setFunctions([flip, euclid])
-        .setOutput([outWidth, outHeight]);
+        .setFunctions([flip, euclid, euclidRGB])
+        //.setPipeline(true)
+        .setOutput([1, 1])
+        .setImmutable(true);
 
     const createCurrent = gpu.createKernel(function(source) {
         //this.color(0.0, 0.0, 0.0, 0.0);
         //this.color(source[0], source[1], source[2], source[3]);
-        return [0.0, 0.0, 0.0, 0.0];
-    })
-        .setOutput([outWidth, outHeight]);
+        // for (let y2 = outHeight - 1; y2 < outHeight; y2++) {
+        //     //for (let y2 = 0; y2 < 1; y2++) {
+        //     for (let x2 = 0; x2 < outWidth; x2++) {
+        //         let x = 0;
+        //         let y = height - 1;
+        //         current[y2][x2][0] = pixelData.data[(x + y * width) * 4 + 0] / 255;
+        //         current[y2][x2][1] = pixelData.data[(x + y * width) * 4 + 1] / 255;
+        //         current[y2][x2][2] = pixelData.data[(x + y * width) * 4 + 2] / 255;
+        //         current[y2][x2][3] = pixelData.data[(x + y * width) * 4 + 3] / 255;
+        //     }
+        // }
 
-    let current = createCurrent(pixelData.data);
+        // if (this.thread.y == this.constants.outHeight - 1) {
+        //     let x = 0;
+        //     let y = this.constants.height - 1;
+        //     let width = this.constants.width;
+        //     let r = source[(x + y * width) * 4 + 0] / 255;
+        //     let g = source[(x + y * width) * 4 + 1] / 255;
+        //     let b = source[(x + y * width) * 4 + 2] / 255;
+        //     let a = source[(x + y * width) * 4 + 3] / 255;
+        //     return [r, g, b, a];
+        // }
+
+        if (this.thread.x == 0 && this.thread.y == 0) {
+            let x = 0;
+            let y = 0;
+            let width = this.constants.width;
+            let r = source[(x + y * width) * 4 + 0] / 255;
+            let g = source[(x + y * width) * 4 + 1] / 255;
+            let b = source[(x + y * width) * 4 + 2] / 255;
+            let a = source[(x + y * width) * 4 + 3] / 255;
+            return [r, g, b, a];
+        }
+
+        // const x = 0;
+        // const y = 0;
+        // const x2 = 0;
+        // const y2 = 0;
+        // current[y2][x2][0] = pixelData.data[(x + y * width) * 4 + 0] / 255;
+        // current[y2][x2][1] = pixelData.data[(x + y * width) * 4 + 1] / 255;
+        // current[y2][x2][2] = pixelData.data[(x + y * width) * 4 + 2] / 255;
+        // current[y2][x2][3] = pixelData.data[(x + y * width) * 4 + 3] / 255;
+
+        return [0.0, 0.0, 0.0, 0.0];
+        //return 0.0;
+    },{
+        constants: {
+            width: width,
+            height: height,
+            outWidth: outWidth,
+            outHeight: outHeight
+        }
+        })
+            .setOutput([outWidth, outHeight])
+            .setImmutable(true);
+
+    //let current = createCurrent(pixelData.data);
 
     //const x = Math.floor(Math.random() * width);
     //const y = Math.floor(Math.random() * height);
@@ -454,21 +565,40 @@ async function main() {
     // current[y2][x2][3] = pixelData.data[(x + y * width) * 4 + 3] / 255;
 
 
-    for (let y2 = outHeight - 1; y2 < outHeight; y2++) {
-        for (let x2 = 0; x2 < outWidth; x2++) {
-            let x = 0;
-            let y = height - 1;
-            current[y2][x2][0] = pixelData.data[(x + y * width) * 4 + 0] / 255;
-            current[y2][x2][1] = pixelData.data[(x + y * width) * 4 + 1] / 255;
-            current[y2][x2][2] = pixelData.data[(x + y * width) * 4 + 2] / 255;
-            current[y2][x2][3] = pixelData.data[(x + y * width) * 4 + 3] / 255;
-        }
-    }
+    // for (let y2 = outHeight - 1; y2 < outHeight; y2++) {
+    // //for (let y2 = 0; y2 < 1; y2++) {
+    //     for (let x2 = 0; x2 < outWidth; x2++) {
+    //         let x = 0;
+    //         let y = height - 1;
+    //         current[y2][x2][0] = pixelData.data[(x + y * width) * 4 + 0] / 255;
+    //         current[y2][x2][1] = pixelData.data[(x + y * width) * 4 + 1] / 255;
+    //         current[y2][x2][2] = pixelData.data[(x + y * width) * 4 + 2] / 255;
+    //         current[y2][x2][3] = pixelData.data[(x + y * width) * 4 + 3] / 255;
+    //     }
+    // }
 
     //console.log("current", current);
 
-    const superKernel = gpu.combineKernels(findNeighbours, remapCurrent, function(current, source, level, filled, evenodd, mx, my, frame) {
-        return remapCurrent(current, source, findNeighbours(current, source, level, filled, evenodd, mx, my), mx, my, frame);
+    const superKernel = gpu.combineKernels(createCurrent, findNeighbours, remapCurrent, pastePixel, function(maxi, outWidth, outHeight, source, level, filled, evenodd) {
+        let current = createCurrent(source);
+
+        for (let i = 0; i < maxi; i++) {
+            const j = i % maxi;
+            const mx = j % outWidth;
+            //const mx = -1;
+            //const my = outHeight - 1 - Math.floor(i / outWidth);
+            const my = Math.floor(j / outWidth);
+            const frame = i;
+            const bigMap = findNeighbours(current, source, level, filled, evenodd, mx, my);
+            const oldCurrent = current;
+            const pixel = remapCurrent(current, source, bigMap, mx, my, frame);
+            current = pastePixel(current, pixel, source, bigMap, mx, my, frame);
+            bigMap.delete();
+            pixel.delete();
+            oldCurrent.delete();
+        }
+
+        return current;
         //return findNeighbours(current, source);
     });
 
@@ -494,16 +624,25 @@ async function main() {
         ctx.putImageData(imgData, 0, 0);
     }
 
-    let maxi = 2 * Math.max(outWidth, outHeight);
-    for (let i = 0; i < outWidth * outHeight; i++) {
+    //let maxi = 2 * Math.max(outWidth, outHeight);
+    let maxi = outWidth * outHeight;
+    const source = pixelData.data;
+    const level = 0;
+    const filled = false;
+    const evenodd = 0;
+    for (let i = 0; i < maxi; i++) {
         const mx = i % outWidth;
-        const my = Math.floor(i / outWidth);
+        const my = outHeight - 1 - Math.floor(i / outWidth);
+        //const my = height - 1 - Math.floor(i / outWidth);
         //current = superKernel(current, pixelData.data, 0, false, i % 4, -1, -1, i);
         // current = superKernel(current, pixelData.data, 0, true, i % 4, -1, -1, i + Math.floor(Math.random() * 3));
-        current = superKernel(current, pixelData.data, 0, false, i % 4, -1, -1, i);
+        //current = superKernel(current, pixelData.data, 0, false, i % 4, mx, my, i);
+        const frame = i;
+        //current = remapCurrent(current, source, findNeighbours(current, source, level, filled, evenodd, mx, my), mx, my, frame).toArray();
         //current = superKernel(current, pixelData.data, 0, true, i % 4, mx, my, i + Math.floor(Math.random() * 3));
-        dump(current);
+        //dump(current);
     }
+    let current = superKernel(maxi, outWidth, outHeight, pixelData.data, 0, false, 0);
     /*
     for (let i = 0; i < maxi; i++) {
         console.log("Iteration: " + i);
