@@ -8,12 +8,15 @@ const $ = require('jquery');
 async function main() {
     // const pixelData = await pixels('flowers.png');
     //const pixelData = await pixels('writing64.png');
-    const pixelData = await pixels('Skyline.png');
+    //const pixelData = await pixels('Skyline.png');
+    // const pixelData = await pixels('Maze.png');
+    const pixelData = await pixels('water_tileset3.png');
+    // const pixelData = await pixels('island.png');
 
     const width = pixelData.width;
     const height = pixelData.height;
-    const outWidth = 100;
-    const outHeight = 100;
+    const outWidth = 64;
+    const outHeight = 64;
 
     const nbWidth = 4 * width;
     const size = width * height;
@@ -41,7 +44,7 @@ async function main() {
     // If current:tx,ty is unoccupied and at least one neighbour current:tx+tdx,ty+tdy is occupied, then:
     // Check if there exists a pair source:x,y and source:x+dx,y+dy such that:
     // distance between source:x+dx,y+dy and current:tx+tdx,ty+tdy is below a threshold.
-    function checkPixel(current, source, x, y, tx, ty) {
+    function checkPixel(current, source, x, y, tx, ty, outWidth, outHeight, width, height) {
         let sum = 0.0;
         let count = 0;
         let count2 = 0;
@@ -69,11 +72,11 @@ async function main() {
                             if (x + dx >= 0 &&
                                 x + dy < this.constants.width &&
                                 tx + tdx >= 0 &&
-                                tx + tdx < this.constants.width2 &&
+                                tx + tdx < this.constants.outWidth &&
                                 y + dy >= 0 &&
                                 y + dy < this.constants.height &&
                                 ty + tdy >= 0 &&
-                                ty + tdy < this.constants.height2 &&
+                                ty + tdy < this.constants.outHeight &&
                                 Math.abs(dx) + Math.abs(dy) > 0.5 &&
                                 Math.abs(tdx) + Math.abs(tdy) > 0.5 &&
                                 euclid([tdx, tdy, 0, 0], [0, 0, 0, 0]) <= 2 * k &&
@@ -106,6 +109,9 @@ async function main() {
                                 let d1 = euclid(a, [0, 0, 0, 0]);
                                 let d2 = euclid(b, [0, 0, 0, 0]);
                                 let d3 = euclid(b, c);
+                                if (b[3] < 0.1 && c[3] < 0.1) {
+                                    d3 = 0.0;
+                                }
                                 let d5 = euclid(before, [0, 0, 0, 0]);
                                 let uninit = d5 <= 1.0e-6 ? true : false;
                                 let d4 = euclid(before, c);
@@ -127,7 +133,7 @@ async function main() {
                                     //    euclid([dx, dy, 0, 0], [tdx, -tdy, 0, 0]) < 0.1) {
                                     //if ((uninit == true || d3 < d4) && d3 < 1.0e-6) {
 
-                                        if (d3 < 1.0e-6) {
+                                        if (d3 < 1.0e-6 && a[3] > 1.0e-6) {
                                             valid++;
                                             avgValid += 1.0;
                                         }
@@ -189,7 +195,10 @@ async function main() {
                 //return (nbOccupied > 0.5 && check && avgValid >= nbOccupied) ? avgValid : 0;
                 //return (nbOccupied > 0.5 && check) ? 1 : 0;
                 // return (nbOccupied > 0.5 && check) ? (nbOccupied + avgValid) : 0;
+
                 return (nbOccupied > 0.5 && check) ? 1 : 0;
+                //return 1;
+
                 //return (check) ? nbOccupied : 0;
                 //sum /= count2;
                 //return (sum >= 0.0 && sum < 1.0 && nbOccupied > 0.5) ? 1 : 0;
@@ -210,14 +219,52 @@ async function main() {
         return y;
     }
 
-    const findNeighbours = gpu.createKernel(function(current, source, level, filled, evenodd, mx, my) {
+    const getWeights = gpu.createKernel(function(source) {
+        let x1 = this.thread.x;
+        let y1 = this.thread.y;
+        let nb1r = source[(x1 + y1 * this.constants.width) * 4 + 0] / 255.0;
+        let nb1g = source[(x1 + y1 * this.constants.width) * 4 + 1] / 255.0;
+        let nb1b = source[(x1 + y1 * this.constants.width) * 4 + 2] / 255.0;
+        let nb1a = source[(x1 + y1 * this.constants.width) * 4 + 3] / 255.0;
+        let cur = [nb1r, nb1g, nb1b, nb1a];
+        let weight = 0;
+        for (let x = 0; x < this.constants.width; x++) {
+            for (let y = 0; y < this.constants.height; y++) {
+                let nb2r = source[(x + y * this.constants.width) * 4 + 0] / 255.0;
+                let nb2g = source[(x + y * this.constants.width) * 4 + 1] / 255.0;
+                let nb2b = source[(x + y * this.constants.width) * 4 + 2] / 255.0;
+                let nb2a = source[(x + y * this.constants.width) * 4 + 3] / 255.0;
+                let cur2 = [nb2r, nb2g, nb2b, nb2a];
+                if (x1 + y1 * this.constants.width > x + y * this.constants.width) {
+                    // If it's not the first of its class, set weight 0
+                    return 0;
+                }
+                if (euclid(cur, cur2) < 1.0e-20) {
+                    weight++;
+                }
+            }
+        }
+        return weight;
+    },{
+        constants: {
+            width: width,
+            height: height,
+            outWidth: outWidth,
+            outHeight: outHeight
+        }
+    })
+        .setFunctions([checkPixel, flip, euclid, euclidRGB])
+        //.setPipeline(true)
+        .setOutput([width, height])
+        .setImmutable(true);
+
+    function findNeighboursFun(current, source, level, filled, evenodd, mx, my, ttx, tty, r1, r2) {
 
         //return [Math.random(), Math.random(), Math.random(), 1.0];
 
         //let ttx = this.constants.width2 - this.thread.x - 1;
-        let ttx = this.thread.x;
-        let tty = this.thread.y; //this.constants.height2 - this.thread.y - 1;
-        let ttz = this.thread.z;
+        // let ttx = this.thread.x;
+        // let tty = this.thread.y; //this.constants.height2 - this.thread.y - 1;
 
         let x = Math.floor(ttx % this.constants.width);
         let y = Math.floor(tty % this.constants.height); //this.constants.height - Math.floor(tty % this.constants.height) - 1;
@@ -244,7 +291,7 @@ async function main() {
         let ret = [0.0, 0.0, 0.0, 0.0];
 
         // if (length(cur) < 0.001 && checkPixel(current, source, x, y, tx, ty) > 0.5) {
-        let cp = checkPixel(current, source, x, y, tx, ty);
+        let cp = checkPixel(current, source, x, y, tx, ty, this.constants.outWidth, this.constants.outHeight, this.constants.width, this.constants.height);
         if (
             //Math.abs((tx + ty) % 4 - evenodd) <= 0.1 &&
             //tx == mx && ty == my &&
@@ -255,23 +302,30 @@ async function main() {
             // let nb1g = source[(x + y * this.constants.width) * 4 + 1] / 255.0;
             // let nb1b = source[(x + y * this.constants.width) * 4 + 2] / 255.0;
             // let nb1a = source[(x + y * this.constants.width) * 4 + 3] / 255.0;
-            let ai = Math.floor(Math.random() * (this.constants.width * this.constants.height));
-            ret = [x + y * this.constants.width + 1, cp, ai, Math.random()];
+
+            let ai = Math.floor(r1 * (this.constants.width * this.constants.height));
+            let w = r2;
+            ret = [x + y * this.constants.width + 1, cp, ai, w];
+
             //ret = [nb1r, nb1g, nb1b, nb1a];
         }
         // let ai = Math.floor(Math.random() * (this.constants.width * this.constants.height));
         // ret = [x + y * this.constants.width + 1, cp, ai, Math.random()];
 
         return ret;
-    },{
-        constants: {
-            width: width,
-            height: height,
-            width2: outWidth,
-            height2: outHeight
-        }
-    })
-        .setFunctions([checkPixel, flip, euclid, euclidRGB])
+    };
+
+    const findNeighbours = gpu.createKernel(function(current, source, level, filled, evenodd, mx, my) {
+            return findNeighboursFun(current, source, level, filled, evenodd, mx, my, this.thread.x, this.thread.y, Math.random(), Math.random());
+        },{
+            constants: {
+                width: width,
+                height: height,
+                outWidth: outWidth,
+                outHeight: outHeight
+            }
+        })
+        .setFunctions([checkPixel, flip, euclid, euclidRGB, findNeighboursFun])
         //.setPipeline(true)
         .setOutput([width, height])
         .setImmutable(true);
@@ -298,12 +352,61 @@ async function main() {
         constants: {
             width: width,
             height: height,
-            width2: outWidth,
-            height2: outHeight
+            outWidth: outWidth,
+            outHeight: outHeight
         }
     })
         .setOutput([outWidth, outHeight])
         .setImmutable(true);
+
+    function getEntropyFun(weights, current, source, ttx, tty, outWidth, outHeight, width, height) {
+        let count = 0;
+        let sum_of_weights = 0;
+        let sum_of_weight_log_weights = 0;
+
+        // let isFree = false;
+        // let hasNB = false;
+        // let k = 1;
+        // for (let dx = -k; dx <= k; dx += 1) {
+        //     for (let dy = -k; dy <= k; dy += 1) {
+        //         if (ttx + dx >= 0 && ttx + dx < outWidth &&
+        //             tty + dy >= 0 && tty + dy < outHeight
+        //         ) {
+        //             let c = current[flip(tty + dy)][ttx + dy];
+        //             let cur = [c[0], c[1], c[2], c[3]];
+        //             if ((euclid(cur, [0, 0, 0, 0]) > 0.001)) {
+        //                 hasNB = true;
+        //             } else if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+        //                 isFree = true;
+        //             }
+        //         }
+        //     }
+        // }
+        //
+        // if (isFree && hasNB) {
+            for (let x = 0; x < width; x++) {
+                for (let y = 0; y < height; y++) {
+                    if (weights[y][x] > 0) {
+                        if (checkPixel(current, source, x, y, ttx, tty, outWidth, outHeight, width, height) > 0.0) {
+                            //const weight = aiv[1];
+                            const weight = weights[y][x];
+                            sum_of_weights += weight;
+                            sum_of_weight_log_weights += weight * Math.log(weight);
+                            count++;
+                        }
+                    }
+                }
+            }
+        // }
+
+        let ret = Math.log(sum_of_weights) - (sum_of_weight_log_weights / sum_of_weights);
+
+        if (count <= 1) {
+            ret = 1.0e20;
+        }
+
+        return ret;
+    }
 
     const remapCurrent = gpu.createKernel(function(current, source, bigMap, mx, my, frame) {
 
@@ -499,9 +602,14 @@ async function main() {
         //     return [r, g, b, a];
         // }
 
+        // if (this.thread.x == Math.floor(this.constants.outWidth / 2) && this.thread.y == Math.floor(this.constants.outHeight / 2)) {
+        //     let x = Math.floor(this.constants.width / 2);
+        //     let y = Math.floor(this.constants.height / 2);
         if (this.thread.x == 0 && this.thread.y == 0) {
-            let x = 0;
-            let y = 0;
+            // let x = 0;
+            // let y = 0;
+            let x = Math.floor(this.constants.width / 2);
+            let y = Math.floor(this.constants.height / 2);
             let width = this.constants.width;
             let r = source[(x + y * width) * 4 + 0] / 255;
             let g = source[(x + y * width) * 4 + 1] / 255;
@@ -579,15 +687,148 @@ async function main() {
 
     //console.log("current", current);
 
-    const superKernel = gpu.combineKernels(createCurrent, findNeighbours, remapCurrent, pastePixel, function(maxi, outWidth, outHeight, source, level, filled, evenodd) {
+    const getEntropies =
+        gpu.createKernel(
+        function(weights, current, source, ttx, tty) {
+            //let ttx = this.thread.x;
+            //let tty = this.thread.y;
+            //let bigMap2 = findNeighboursFun(current, source, 0, false, 0, x, y, ttx, tty);
+            let entropy = getEntropyFun(weights, current, source, ttx, tty,
+                this.constants.outWidth, this.constants.outHeight,
+                this.constants.width, this.constants.height);
+            //bigMap2.delete();
+            return entropy;
+        },{
+            constants: {
+                width: width,
+                height: height,
+                outWidth: outWidth,
+                outHeight: outHeight
+            }
+        })
+            //findNeighboursFun
+            .setFunctions([getEntropyFun, checkPixel, flip, euclid, euclidRGB])
+            .setOutput([1, 1])
+            .setImmutable(true);
+
+    gpu.addFunction(getEntropyFun);
+
+    const createSkipMap = gpu.createKernel(function(current, outWidth, outHeight) {
+        let isFree = false;
+        let hasNB = false;
+        let k = 1;
+        let ttx = this.thread.x;
+        let tty = this.thread.y;
+        for (let dx = -k; dx <= k; dx += 1) {
+            for (let dy = -k; dy <= k; dy += 1) {
+                if (ttx + dx >= 0 && ttx + dx < outWidth &&
+                    tty + dy >= 0 && tty + dy < outHeight
+                ) {
+                    let c = current[flip(tty + dy)][ttx + dx];
+                    let cur = [c[0], c[1], c[2], c[3]];
+                    if ((euclid(cur, [0, 0, 0, 0]) > 0.001)) {
+                        hasNB = true;
+                    } else if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+                        isFree = true;
+                    }
+                }
+            }
+        }
+
+        return isFree && hasNB ? 1 : 0;
+    })
+        .setFunctions([flip, euclid])
+        .setOutput([outWidth, outHeight]);
+
+    const superKernel = gpu.combineKernels(
+        getWeights, getEntropies, createSkipMap, createCurrent, findNeighbours, remapCurrent, pastePixel,
+        function(maxi, outWidth, outHeight, width, height, source, level, filled, evenodd) {
         let current = createCurrent(source);
 
-        for (let i = 0; i < maxi; i++) {
+        let weights = getWeights(source);
+
+        // (0, 0), (1, 0), (0, 1), (2, 0), (1, 1), (0, 2)
+
+        let sumctr = 0;
+        let xctr = 0;
+        for (let i = 0; i < 2 *maxi; i++) {
             const j = i % maxi;
-            const mx = j % outWidth;
+
             //const mx = -1;
             //const my = outHeight - 1 - Math.floor(i / outWidth);
+
+            // const mx = xctr;
+            // const my = sumctr - xctr;
+            //
+            // if (xctr == 0) {
+            //     sumctr++;
+            //     xctr = sumctr;
+            // } else {
+            //     xctr--;
+            // }
+
+            const mx = j % outWidth;
             const my = Math.floor(j / outWidth);
+
+            // let min = 1.0e20;
+            // let minX = 0;
+            // let minY = 0;
+            //
+            // // let entropies = getEntropies(weights, current, source);
+            // // let ear = entropies.toArray();
+            // //let currentA = current.toArray();
+            //
+            // // let skipMap = createSkipMap(current, outWidth, outHeight);
+            // // let skipMapA = skipMap.toArray();
+            //
+            // let currentA = current.toArray();
+            //
+            // for (let x = 0; x < outWidth; x++) {
+            //     for (let y = 0; y < outHeight; y++) {
+            //         // let entropy = getEntropyFun(weights, current, source, x, y, outWidth, outHeight, width, height);
+            //
+            //         let isFree = false;
+            //         let hasNB = false;
+            //         let k = 1;
+            //         let ttx = x;
+            //         let tty = y;
+            //         for (let dx = -k; dx <= k; dx += 1) {
+            //             for (let dy = -k; dy <= k; dy += 1) {
+            //                 if (ttx + dx >= 0 && ttx + dx < outWidth &&
+            //                     tty + dy >= 0 && tty + dy < outHeight
+            //                 ) {
+            //                     let c = currentA[flip(tty + dy)][ttx + dx];
+            //                     let cur = [c[0], c[1], c[2], c[3]];
+            //                     if ((euclid(cur, [0, 0, 0, 0]) > 0.001)) {
+            //                         hasNB = true;
+            //                     } else if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+            //                         isFree = true;
+            //                     }
+            //                 }
+            //             }
+            //         }
+            //
+            //         // if (skipMapA[y][x]) {
+            //         // if (isFree && hasNB) {
+            //             let entropy = getEntropies(weights, current, source, x, y);
+            //             //const entropy = ear[y][x];
+            //             let e = entropy.toArray()[0][0];
+            //             if (e < min) {
+            //                 min = e;
+            //                 minX = x;
+            //                 minY = y;
+            //             }
+            //         // }
+            //     }
+            // }
+            // // entropies.delete();
+            //
+            // const mx = minX;
+            // const my = minY;
+
+            // const mx = Math.floor(Math.random() * outWidth);
+            // const my = Math.floor(Math.random() * outHeight);
+
             const frame = i;
             const bigMap = findNeighbours(current, source, level, filled, evenodd, mx, my);
             const oldCurrent = current;
@@ -642,7 +883,7 @@ async function main() {
         //current = superKernel(current, pixelData.data, 0, true, i % 4, mx, my, i + Math.floor(Math.random() * 3));
         //dump(current);
     }
-    let current = superKernel(maxi, outWidth, outHeight, pixelData.data, 0, false, 0);
+    let current = superKernel(maxi, outWidth, outHeight, width, height, pixelData.data, 0, false, 0);
     /*
     for (let i = 0; i < maxi; i++) {
         console.log("Iteration: " + i);
